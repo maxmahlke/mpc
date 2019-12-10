@@ -250,6 +250,10 @@ def obs(number, designation, band, observatory, csv, raw):
         parsed = parsed.append(observation,
                                ignore_index=True)
 
+    if parsed.empty:
+        click.echo('No observations found!')
+        sys.exit()
+
     if not csv:
         pd.set_option('display.max_columns', None)
         pd.set_option('display.width', None)
