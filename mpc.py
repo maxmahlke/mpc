@@ -8,7 +8,7 @@
     Extracts SSO observations from the complete observational
     sets of the MPC
 
-    Call as:	python extract_observations.py AST_IDENTIFIER
+    Call as:    mpc --help
 '''
 
 import os
@@ -25,6 +25,7 @@ import click
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from sbpy.data import Names
 
 
 @click.group()
@@ -195,8 +196,12 @@ def obs(number, designation, band, observatory, csv, raw):
             ident = ident.ljust(12, '.')
 
     elif designation:
-        sys.exit()
-        filename = ''
+        for cent in ['18', '19', '20']:
+            if designation.startswith(cent):
+                filename = f'{cent}XX.txt'
+                break
+            ident = ' ' * 5 + Names.to_packed(designation)
+
     else:
         click.echo(f'Need to provide either SSO number or designation of '
                    f'unnumbered minor planet')
@@ -222,7 +227,7 @@ def obs(number, designation, band, observatory, csv, raw):
     if raw:
         if not csv:
             for obs in grep.stdout:
-                print(obs.decode().strip())
+                print(obs.decode().strip('\n'))
             sys.exit()
         else:
             with open(ident.strip('.') + '.csv', 'w') as out:
@@ -236,14 +241,13 @@ def obs(number, designation, band, observatory, csv, raw):
                                    'band', 'observatory'])
 
     for obs in grep.stdout:
-        obs = obs.decode().strip()
+        obs = obs.decode().strip('\n')
+        observation = _parse_observation(obs)
 
-        # Satellite data is skipped because the coordinate treatment
-        # is not trivial
-        if obs[-3:] in ['C51']:
+        if observation is False:
             continue
 
-        parsed = parsed.append(_parse_observation(obs),
+        parsed = parsed.append(observation,
                                ignore_index=True)
 
     if not csv:
@@ -301,7 +305,7 @@ def _parse_observation(line):
 
     else:
         # Unpack the designation
-        desig = ''
+        desig = Names.from_packed(line[5:12])
         number = ''
 
     # ------
@@ -312,13 +316,16 @@ def _parse_observation(line):
     # ------
     # Convert the epoch to MJD
     epoch = Time(line[15:25].replace(' ', '-')).mjd  # day to MJD
-    epoch = f'{int(epoch)}.{line[26:32]}' # add decimal day
+    epoch = f'{int(epoch)}.{line[26:32]}'  # add decimal day
 
     # ------
     # Convert ra and dec to degree
-    coord = SkyCoord(ra=line[32:44], dec=line[44:57],
-                     unit=(u.hourangle, u.deg),
-                     frame='icrs')
+    try:
+        coord = SkyCoord(ra=line[32:44], dec=line[44:57],
+                         unit=(u.hourangle, u.deg),
+                         frame='icrs')
+    except ValueError:  # arises when satellite position is given. skip those
+        return False
     ra = coord.ra.deg
     dec = coord.dec.deg
 
@@ -335,97 +342,3 @@ def _parse_observation(line):
                      'dec': dec, 'mag': mag, 'band': band,
                      'observatory': observatory})
     return obs
-
-    # # convert asteroid designations
-    # # old designation style, e.g.: 1989AB
-    # ident = data['pdesig'][0]
-    # if isinstance(ident, np.ma.masked_array) and ident.mask:
-        # ident = ''
-    # elif (len(ident) < 7 and ident[:4].isdigit() and
-            # ident[4:6].isalpha()):
-        # ident = ident[:4]+' '+ident[4:6]
-    # # Palomar Survey
-    # elif 'PLS' in ident:
-        # ident = ident[3:] + " P-L"
-    # # Trojan Surveys
-    # elif 'T1S' in ident:
-        # ident = ident[3:] + " T-1"
-    # elif 'T2S' in ident:
-        # ident = ident[3:] + " T-2"
-    # elif 'T3S' in ident:
-        # ident = ident[3:] + " T-3"
-    # # standard MPC packed 7-digit designation
-    # elif (ident[0].isalpha() and ident[1:3].isdigit() and
-          # ident[-1].isalpha() and ident[-2].isdigit()):
-        # yr = str(conf.pkd.find(ident[0]))+ident[1:3]
-        # let = ident[3]+ident[-1]
-        # num = str(conf.pkd.find(ident[4]))+ident[5]
-        # num = num.lstrip("0")
-        # ident = yr+' '+let+num
-    # data.add_column(Column([ident]*len(data), name='desig'),
-                    # index=1)
-    # data.remove_column('pdesig')
-
-    # elif all([o['object_type'] != 'M' for o in src]):
-        # # comets
-        # data = ascii.read("\n".join([o['original_record']
-                                     # for o in src]),
-                          # format='fixed_width_no_header',
-                          # names=('number', 'comettype', 'desig',
-                                 # 'note1', 'note2', 'epoch',
-                                 # 'RA', 'DEC', 'mag', 'phottype',
-                                 # 'observatory'),
-                          # col_starts=(0, 4, 5, 13, 14, 15,
-                                      # 32, 44, 65, 70, 77),
-                          # col_ends=(3, 4, 12, 13, 14, 31,
-                                    # 43, 55, 69, 70, 79))
-
-        # # convert comet designations
-        # ident = data['desig'][0]
-
-        # if (not isinstance(ident, (np.ma.masked_array,
-                                   # np.ma.core.MaskedConstant))
-                # or not ident.mask):
-            # yr = str(conf.pkd.find(ident[0]))+ident[1:3]
-            # let = ident[3]
-            # # patch to parse asteroid designations
-            # if len(ident) == 7 and str.isalpha(ident[6]):
-                # let += ident[6]
-                # ident = ident[:6] + ident[7:]
-            # num = str(conf.pkd.find(ident[4]))+ident[5]
-            # num = num.lstrip("0")
-            # if len(ident) >= 7:
-                # frag = ident[6] if ident[6] != '0' else ''
-            # else:
-                # frag = ''
-            # ident = yr+' '+let+num+frag
-            # # remove and add desig column to overcome length limit
-            # data.remove_column('desig')
-            # data.add_column(Column([ident]*len(data),
-                                   # name='desig'), index=3)
-    # else:
-        # raise ValueError(('Object type is ambiguous. "{}" '
-                          # 'are present.').format(
-                              # set([o['object_type'] for o in src])))
-
-    # # convert dates to Julian Dates
-    # dates = [d[:10].replace(' ', '-') for d in data['epoch']]
-    # times = np.array([float(d[10:]) for d in data['epoch']])
-    # jds = Time(dates, format='iso').jd+times
-    # data['epoch'] = jds
-
-    # # convert ra and dec to degrees
-    # coo = SkyCoord(ra=data['RA'], dec=data['DEC'],
-                   # unit=(u.hourangle, u.deg),
-                   # frame='icrs')
-    # data['RA'] = coo.ra.deg
-    # data['DEC'] = coo.dec.deg
-
-    # # convert Table to QTable
-    # data = QTable(data)
-    # data['epoch'].unit = u.d
-    # data['RA'].unit = u.deg
-    # data['DEC'].unit = u.deg
-    # data['mag'].unit = u.mag
-
-    # return line
