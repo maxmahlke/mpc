@@ -259,7 +259,7 @@ def obs(number, designation, band, observatory, csv, raw):
         pd.set_option('display.width', None)
         click.echo(parsed)
     else:
-        parsed.to_csv(ident.strip('.') + '.csv', index=False)
+        parsed.to_csv(ident.strip().strip('.') + '.csv', index=False)
     return obs
 
 
