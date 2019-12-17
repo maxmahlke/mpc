@@ -12,6 +12,7 @@
 '''
 
 import os
+import re
 import string
 import subprocess
 import sys
@@ -236,13 +237,19 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
                             stdout=subprocess.PIPE)
 
     # If raw output is requested, echo to console or write to file
+    if number:
+        path_output = f'{number}.csv'
+    elif designation:
+        clean_designation = re.sub(r'[^\w]', '', designation)
+        path_output = f'{clean_designation}.csv'
+
     if raw:
         if not csv:
             for obs in grep.stdout:
                 print(obs.decode().strip('\n'))
             sys.exit()
         else:
-            with open(ident.strip('.') + '.csv', 'w') as out:
+            with open(path_output, 'w') as out:
                 for obs in grep.stdout:
                     out.write(obs.decode())
             sys.exit()
@@ -264,7 +271,7 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
 
     if parsed.empty:
         click.echo('No observations found!')
-        parsed.to_csv(ident.strip().strip('.') + '.csv', index=False)
+        parsed.to_csv(path_output, index=False)
         sys.exit()
 
     if ephemerides:
@@ -278,7 +285,7 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
         pd.set_option('display.width', None)
         click.echo(parsed)
     else:
-        parsed.to_csv(ident.strip().strip('.') + '.csv', index=False)
+        parsed.to_csv(path_output, index=False)
     return obs
 
 
