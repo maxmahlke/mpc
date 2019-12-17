@@ -24,8 +24,9 @@ import astropy.units as u
 import click
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+import requests
 from sbpy.data import Names
+from tqdm import tqdm
 
 
 @click.group()
@@ -63,6 +64,8 @@ def retrieve(unnumbered_only, numbered_only):
         click.echo('Gunzipping..')
         subprocess.call(['gunzip', output_path])
         output_path = 'data/' + os.path.splitext(filename)[0]
+        output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   output_path)
 
         # Split files into chunks for faster grepping later
         if filename == 'NumObs.txt.gz':
@@ -150,15 +153,18 @@ class ProgressBar(tqdm):
 @click.option('--designation', type=str,
               help='Select observations by asteroid number')
 @click.option('--band', type=str, default='*',
-              help='Select observations by asteroid number')
+              help='Select observations by band. Can be comma-separated list.')
 @click.option('--observatory', type=str, default='*',
-              help=f'Select observations by observatory code.')
+              help=f'Select observations by observatory code.'
+                   f'Can be comma-separated list.')
 @click.option('--csv', is_flag=True,
               help=f'Save output to csv file')
 @click.option('--raw', is_flag=True,
               help=f'Print original 80-column format')
+@click.option('--ephemerides', is_flag=True,
+              help=f'Query asteorid ephemerides with Miriade')
 @cli.command()
-def obs(number, designation, band, observatory, csv, raw):
+def obs(number, designation, band, observatory, csv, raw, ephemerides):
     ''' Echo MPC observations
     '''
 
@@ -217,11 +223,17 @@ def obs(number, designation, band, observatory, csv, raw):
         click.echo('\nObservation files are older than one month. '
                    'Consider running "mpc retrieve" and getting a coffee.\n')
 
+    if ',' in band:
+        band = f'[{band.replace(",", "")}]'
+
+    grep_string = r'\|'.join([f'^{ident}.*{band}......{obscode}$'
+                              for obscode in observatory.split(',')])
+
     # Build grep command: The identifier is at the beginning of the line,
     # the observatory (if provided) at the end. At position 70, we should have
     # the band
-    grep = subprocess.Popen(['grep', f'^{ident}.*{band}......{observatory}$',
-                             path_mpc], stdout=subprocess.PIPE)
+    grep = subprocess.Popen(['grep', grep_string, path_mpc],
+                            stdout=subprocess.PIPE)
 
     # If raw output is requested, echo to console or write to file
     if raw:
@@ -252,7 +264,14 @@ def obs(number, designation, band, observatory, csv, raw):
 
     if parsed.empty:
         click.echo('No observations found!')
+        parsed.to_csv(ident.strip().strip('.') + '.csv', index=False)
         sys.exit()
+
+    if ephemerides:
+        parsed = _miriade_ephems_for_obs(parsed)
+        if parsed is False:
+            print(f'Miriade query failed for {ident}')
+            sys.exit()
 
     if not csv:
         pd.set_option('display.max_columns', None)
@@ -302,7 +321,7 @@ def _parse_observation(line):
     if not number.isspace():
         # Check if first character needs to be converted
         if number[0].isalpha():
-            number = _letter_to_number(number[0]) + number[1:]
+            number = str(_letter_to_number(number[0])) + str(number[1:])
 
         number = int(number)
         desig = ''
@@ -335,7 +354,7 @@ def _parse_observation(line):
 
     # ------
     if not line[65:69].isspace():
-        mag = float(line[65:69])
+        mag = float(line[65:70])
     else:
         mag = ''
     band = line[70]
@@ -345,4 +364,57 @@ def _parse_observation(line):
                      'note1': note1, 'note2': note2, 'epoch': epoch, 'ra': ra,
                      'dec': dec, 'mag': mag, 'band': band,
                      'observatory': observatory})
+    return obs
+
+
+def _miriade_ephems_for_obs(obs):
+    '''Gets asteroid ephemerides from IMCCE Miriade for MPC formatted
+    observations of a single SSO
+
+    :obs: pd.DataFrame - MPC observations
+    :returns: pd.DataFrame - Input dataframe with ephemerides columns appended
+                     False - If query failed somehow
+    '''
+    try:
+        ident = obs['number'].values[0]  # What SSO are we talking about 
+    except IndexError:
+        ident = obs['desig'].values[0]
+
+    obs = obs.sort_values('epoch')  # increases performance in Miriade
+    obs = obs.reset_index()
+
+    # ------
+    # Query Miriade for phase angles
+    url = 'http://vo.imcce.fr/webservices/miriade/ephemcc_query.php'
+
+    params = {
+
+        '-name': f'a:{ident}',
+        '-mime': 'json',
+        '-tcoor': '5',
+        '-output': '--jul',
+        '-tscale': 'UTC'
+    }
+
+    # Pass sorted list of epochs to speed up query
+    # Have to convert them to JD
+    epochs = [Time(e, format='mjd').jd for e in obs.epoch.astype(float)]
+    files = {'epochs': ('epochs',
+                        '\n'.join(['%.6f' % epoch
+                                   for epoch in epochs]))}
+    # Execute query
+    try:
+        r = requests.post(url, params=params, files=files, timeout=50)
+    except requests.exceptions.ReadTimeout:
+        return False
+    j = r.json()
+
+    # Read JSON response
+    try:
+        ephem = pd.DataFrame.from_dict(j['data'])
+    except KeyError:
+        return False
+
+    obs = pd.merge(obs, ephem, how='outer', left_on=obs.index,
+                   right_on=ephem.index)
     return obs
