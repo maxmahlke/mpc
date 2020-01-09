@@ -44,6 +44,10 @@ def retrieve(unnumbered_only, numbered_only):
     ''' Retrieve observations to file
     '''
 
+    output_path = os.path.realpath(os.path.join(os.path.dirname(
+                                                    os.path.abspath(__file__)),
+                                               'data/'))
+
     for filename in ['NumObs.txt.gz', 'UnnObs.txt.gz']:
 
         if filename == 'NumObs.txt.gz':
@@ -63,59 +67,52 @@ def retrieve(unnumbered_only, numbered_only):
 
         # Gunzip
         click.echo('Gunzipping..')
-        subprocess.call(['gunzip', output_path])
+        # subprocess.call(['gunzip', output_path])
+
         output_path = 'data/' + os.path.splitext(filename)[0]
         output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    output_path)
 
-        # Split files into chunks for faster grepping later
+        click.echo('Splitting file into chunks..')
+
+        # We divide the observations files into 100 (20) roughly
+        # equally sized chunks and use an index later for lookups
+        # This greatly increases grep speed
+
         if filename == 'NumObs.txt.gz':
-            # Split the numbered observations by 100k
-            click.echo('Splitting file into chunks..')
+            N = 100  # number of chunks
+            prefix = 'num'
+            position = (0, 5)
+        else:
+            N = 20
+            prefix = 'unnum'
+            position = (5, 12)
 
-            # Firs 100k start with digit
-            subprocess.call(['grep', f'^[0-9]', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'0_99999.txt', 'w'))
-            # Up to 620k, the two leading digits are endoced in ascii letters
-            subprocess.call(['grep', f'^[A-J]', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'100000_199999.txt', 'w'))
-            subprocess.call(['grep', f'^[K-T]', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'200000_299999.txt', 'w'))
-            subprocess.call(['grep', f'^[T-Za-f]', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'300000_399999.txt', 'w'))
-            subprocess.call(['grep', f'^[g-p]', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'400000_499999.txt', 'w'))
-            subprocess.call(['grep', f'^[q-z]', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'500000_620000.txt', 'w'))
-            # Now, we're swtiching to ~=620k, and base64 encoding
-            # second character is x*64**3
-            subprocess.call(['grep', f'^~0', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'620001_882144.txt', 'w'))
-            subprocess.call(['grep', f'^~1', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'620001_882144.txt', 'w'))
-            subprocess.call(['grep', f'^~2', output_path],
-                            stdout=open(f'{os.path.dirname(output_path)}/'
-                                        f'882145_144288.txt', 'w'))
+        # subprocess.call(['split', '-n', f'l/{N}', output_path,
+                         # f'{os.path.dirname(output_path)}/{prefix}'])
 
-        if filename == 'UnnObs.txt.gz':
-            # Split the unnumbered observations by century
-            click.echo('Splitting file into chunks..')
-            for year in ['18XX', '19XX', '20XX']:
-                letter = string.ascii_uppercase[int(year[:2]) - 10]
-                subprocess.call(['grep', f'^\ *{letter}', output_path],
-                                stdout=open(f'{os.path.dirname(output_path)}/'
-                                            f'{year}.txt', 'w'))
+        # Now create lookup index
+        click.echo('Creating lookup index..')
+        index_path = f'data/index{prefix}.txt'
+        index_path = os.path.realpath(os.path.join(os.path.dirname(__file__),
+                                                   index_path))
+
+        # To create the index, we check the first and last
+        # designations in each file
+        chunks_path = os.path.realpath(os.path.dirname(output_path))
+        chunks = [os.path.join(chunks_path, c) for c in os.listdir(chunks_path)
+                  if c.startswith(prefix)]
+
+        with open(index_path, 'w') as index:
+            for chunk in chunks:
+                with open(chunk, 'r') as f:
+                    first_desi = f.readline()[position[0]:position[1]]
+                    for line in f:
+                        last_desi = line[position[0]:position[1]]
+                index.write(f'{chunk} {first_desi} {last_desi}\n')
 
         # Remove cached observations file
-        os.remove(output_path)
+        # os.remove(output_path)
 
 
 def _retrieve(filename):
@@ -133,10 +130,10 @@ def _retrieve(filename):
     output_path = os.path.join(output_dir, filename)
 
     # Download observations
-    with ProgressBar(unit='B', unit_scale=True,
-                     miniters=1, desc=filename.split('.')[0]) as t:
-        urlretrieve(url + filename, filename=output_path,
-                    reporthook=t.update_to)
+    # with ProgressBar(unit='B', unit_scale=True,
+                     # miniters=1, desc=filename.split('.')[0]) as t:
+        # urlretrieve(url + filename, filename=output_path,
+                    # reporthook=t.update_to)
     return output_path
 
 
@@ -174,22 +171,31 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
 
     # Locate the correct file chunk to grep
     if number:
-        if number <= 99999:
-            filename = '0_99999.txt'
-        elif 100000 <= number <= 199999:
-            filename = '100000_199999.txt'
-        elif 200000 <= number <= 299999:
-            filename = '200000_299999.txt'
-        elif 300000 <= number <= 399999:
-            filename = '300000_399999.txt'
-        elif 400000 <= number <= 499999:
-            filename = '400000_499999.txt'
-        elif 500000 <= number <= 620000:
-            filename = '500000_620000.txt'
-        elif 620001 <= number <= 882144:
-            filename = '620001_882144.txt'
-        elif 882145 <= number <= 144288:
-            filename = '882145_144288.txt'
+        index_path = f'data/indexnum.txt'
+        index_path = os.path.realpath(os.path.join(os.path.dirname(__file__),
+                                                   index_path))
+
+        to_grep = []  # most likely just one file, but could be two
+
+        with open(index_path, 'r') as index:
+
+            for line in index:
+
+                filename, fnumber, lnumber = line.split()
+
+                # Check if first character needs to be converted
+                if fnumber[0].isalpha():
+                    fnumber = str(_letter_to_number(fnumber[0])) \
+                                  + str(fnumber[1:])
+                fnumber = int(fnumber)
+
+                if lnumber[0].isalpha():
+                    lnumber = str(_letter_to_number(lnumber[0])) \
+                                  + str(lnumber[1:])
+                lnumber = int(lnumber)
+
+                if fnumber <= number <= lnumber:
+                    to_grep.append(filename)
 
         # Build the identifier. It should always equal 12 characters
         if number <= 99999:
@@ -203,24 +209,36 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
             ident = ident.ljust(12, '.')
 
     elif designation:
-        for cent in ['18', '19', '20']:
-            if designation.startswith(cent):
-                filename = f'{cent}XX.txt'
-                break
-            ident = ' ' * 5 + Names.to_packed(designation)
+        index_path = f'data/indexunnum.txt'
+        index_path = os.path.realpath(os.path.join(os.path.dirname(__file__),
+                                                   index_path))
+
+        to_grep = []  # most likely just one file, but could be two
+
+        # Convert passed designation
+        check_for = Names.to_packed(designation)
+
+        with open(index_path, 'r') as index:
+            for line in index:
+
+                filename, fdesi, ldesi = line.split()
+
+                if fdesi <= check_for <= ldesi:
+                    to_grep.append(line.split()[0])
+
+        ident = ' ' * 5 + check_for
 
     else:
         click.echo(f'Need to provide either SSO number or designation of '
                    f'unnumbered minor planet')
 
-    path_mpc = os.path.join(path_data, filename)
-
-    if not os.path.isfile(path_mpc):
+    # Check if data exists and is not outdated
+    if not os.path.isfile(to_grep[0]):
         click.echo(f'Could not find observations in path. '
                    f'Consider running "mpc retrieve" and getting a coffee.')
         sys.exit()
 
-    if (time() - os.path.getmtime(path_mpc)) / (3600*24) >= 30:
+    if (time() - os.path.getmtime(to_grep[0])) / (3600*24) >= 30:
         click.echo('\nObservation files are older than one month. '
                    'Consider running "mpc retrieve" and getting a coffee.\n')
 
@@ -233,8 +251,12 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
     # Build grep command: The identifier is at the beginning of the line,
     # the observatory (if provided) at the end. At position 70, we should have
     # the band
-    grep = subprocess.Popen(['grep', grep_string, path_mpc],
-                            stdout=subprocess.PIPE)
+    output = []
+    for file_ in to_grep:
+        grep = subprocess.Popen(['grep', grep_string, file_],
+                                stdout=subprocess.PIPE)
+        for line in grep.stdout:
+            output.append(line)
 
     # If raw output is requested, echo to console or write to file
     if number:
@@ -245,12 +267,12 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
 
     if raw:
         if not csv:
-            for obs in grep.stdout:
+            for obs in output:
                 print(obs.decode().strip('\n'))
             sys.exit()
         else:
             with open(path_output, 'w') as out:
-                for obs in grep.stdout:
+                for obs in output:
                     out.write(obs.decode())
             sys.exit()
 
@@ -259,7 +281,7 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
                                    'note2', 'epoch', 'ra', 'dec', 'mag',
                                    'band', 'observatory'])
 
-    for obs in grep.stdout:
+    for obs in output:
         obs = obs.decode().strip('\n')
         observation = _parse_observation(obs)
 
@@ -270,7 +292,6 @@ def obs(number, designation, band, observatory, csv, raw, ephemerides):
                                ignore_index=True)
 
     if parsed.empty:
-        click.echo('No observations found!')
         parsed.to_csv(path_output, index=False)
         sys.exit()
 
@@ -382,9 +403,9 @@ def _miriade_ephems_for_obs(obs):
     :returns: pd.DataFrame - Input dataframe with ephemerides columns appended
                      False - If query failed somehow
     '''
-    try:
-        ident = obs['number'].values[0]  # What SSO are we talking about 
-    except IndexError:
+    ident = obs['number'].values[0]  # What SSO are we talking about
+
+    if not isinstance(ident, (int, float, np.int64)):
         ident = obs['desig'].values[0]
 
     obs = obs.sort_values('epoch')  # increases performance in Miriade
