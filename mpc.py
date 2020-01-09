@@ -67,7 +67,7 @@ def retrieve(unnumbered_only, numbered_only):
 
         # Gunzip
         click.echo('Gunzipping..')
-        # subprocess.call(['gunzip', output_path])
+        subprocess.call(['gunzip', output_path])
 
         output_path = 'data/' + os.path.splitext(filename)[0]
         output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -88,8 +88,8 @@ def retrieve(unnumbered_only, numbered_only):
             prefix = 'unnum'
             position = (5, 12)
 
-        # subprocess.call(['split', '-n', f'l/{N}', output_path,
-                         # f'{os.path.dirname(output_path)}/{prefix}'])
+        subprocess.call(['split', '-n', f'l/{N}', output_path,
+                         f'{os.path.dirname(output_path)}/{prefix}'])
 
         # Now create lookup index
         click.echo('Creating lookup index..')
@@ -112,7 +112,7 @@ def retrieve(unnumbered_only, numbered_only):
                 index.write(f'{chunk} {first_desi} {last_desi}\n')
 
         # Remove cached observations file
-        # os.remove(output_path)
+        os.remove(output_path)
 
 
 def _retrieve(filename):
@@ -130,10 +130,10 @@ def _retrieve(filename):
     output_path = os.path.join(output_dir, filename)
 
     # Download observations
-    # with ProgressBar(unit='B', unit_scale=True,
-                     # miniters=1, desc=filename.split('.')[0]) as t:
-        # urlretrieve(url + filename, filename=output_path,
-                    # reporthook=t.update_to)
+    with ProgressBar(unit='B', unit_scale=True,
+                     miniters=1, desc=filename.split('.')[0]) as t:
+        urlretrieve(url + filename, filename=output_path,
+                    reporthook=t.update_to)
     return output_path
 
 
