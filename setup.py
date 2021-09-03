@@ -9,7 +9,8 @@ setup(
         'click',
         'numpy',
         'pandas',
-        'tqdm'
+        'tqdm',
+        "sbpy",
     ],
     entry_points='''
         [console_scripts]
